@@ -1,0 +1,56 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: template-test
+  namespace: default
+data:
+  template: |
+    --------------------
+    {{ $v := get "-n" "kube-system" "pods" -}}
+    {{- range $v -}}
+    {{ .kind }}: {{ .metadata.namespace }} {{ .metadata.name }}
+    --------------------
+    {{ end -}}
+    {{- $v := get "nodes" -}}
+    {{- range $v -}}
+    {{ .kind }}: {{ .metadata.name }}
+    {{ end -}}
+    --------------------
+    {{- $v := get "services" -}}
+    {{- range $v -}}
+    {{- if eq .spec.type "LoadBalancer" }}
+
+    # {{ .metadata.namespace }}/{{ .metadata.name }}
+    {{ $ips := .spec.externalIPs -}}
+    {{- range .spec.ports }}
+    {{- $name := .name -}}
+    {{- $port := .port -}}
+    {{- $targetPort := .nodePort -}}
+    {{- $protocol := .protocol -}}
+    {{ range $ips }}
+    # {{ $name  }}
+    virtual_server {{ . }} {{ $port }} {
+        delay_loop 6
+        lb_algo rr
+        lb_kind NAT
+        persistence_timeout 50
+        protocol {{ $protocol }}
+        {{- $nodes := get "nodes" -}}
+        {{ range $nodes -}}
+        {{ range .status.addresses }}{{ if eq .type "InternalIP" }}
+        real_server {{ .address }} {{ $targetPort }} {
+            weight 1
+            TCP_CHECK {
+                connect_port {{ $targetPort }} 
+                connect_timeout 5
+            }
+        }
+        {{- end }}
+        {{- end }}
+    {{- end }}
+    }
+    {{ end -}}
+    {{ end -}}
+    {{ end -}}
+    {{ end -}}

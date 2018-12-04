@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loadbalancer-config
+  namespace: default
+data:
+  configfile: "lbconfig.conf"
+  command: "/usr/bin/systemctl daemon-reload ; /usr/bin/systemctl reload keepalived"
+  configTemplate: |
+    #
+    # Managed by Kubernetes
+    #
+    {{- $v := get "services" -}}
+    {{- range $v -}}
+    {{- if eq .spec.type "LoadBalancer" }}
+
+    # {{ .metadata.namespace }}/{{ .metadata.name }}
+    {{ $ips := .spec.externalIPs -}}
+    {{- range .spec.ports }}
+    {{- $name := .name -}}
+    {{- $port := .port -}}
+    {{- $targetPort := .nodePort -}}
+    {{- $protocol := .protocol -}}
+    {{ range $ips }}
+    # {{ $name  }}
+    virtual_server {{ . }} {{ $port }} {
+        delay_loop 6
+        lb_algo rr
+        lb_kind NAT
+        persistence_timeout 50
+        protocol {{ $protocol }}
+        {{- $nodes := get "nodes" -}}
+        {{ range $nodes -}}
+        {{ range .status.addresses }}{{ if eq .type "InternalIP" }}
+        real_server {{ .address }} {{ $targetPort }} {
+            weight 1
+            TCP_CHECK {
+                connect_port {{ $targetPort }} 
+                connect_timeout 5
+            }
+        }
+        {{- end }}
+        {{- end }}
+    {{- end }}
+    }
+    {{ end -}}
+    {{ end -}}
+    {{ end -}}
+    {{ end -}}
+  template: |
+    {{- $v := get "-n" "default" "configmaps" -}}
+    {{- range $v -}}
+    {{- if eq .metadata.name "loadbalancer-config" -}}
+    {{- $command := .data.command -}}
+    {{- $lbdata := render .metadata.name .data.configTemplate -}}
+    {{- $filedata := readfile .data.configfile -}}
+    {{- if ne $lbdata $filedata -}}
+    {{- log "Updated Loadbalancer Config" .data.configfile -}}
+    {{- writefile .data.configfile $lbdata -}}
+    {{- exec "/bin/sh" "-c" $command -}}
+    {{ end -}}
+    {{- end -}}
+    {{- end -}}
