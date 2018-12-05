@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"reflect"
 	"sort"
 
@@ -19,6 +20,7 @@ type QueryType struct {
 	qSchema   schema.GroupVersionResource
 	listOpts  metav1.ListOptions
 	Namespace string
+	id        string
 }
 
 type ResourceCacheMessage struct {
@@ -26,13 +28,14 @@ type ResourceCacheMessage struct {
 	query    QueryType
 }
 type ResourceCacheType struct {
+	id            string
 	Resource      []map[string]interface{}
 	dynamicClient dynamic.Interface
 	query         QueryType
 	quit          chan string
 }
 
-func NewResourceCache(dynamicClient dynamic.Interface, query QueryType, event chan ResourceCacheMessage) ResourceCacheType {
+func NewResourceCache(dynamicClient dynamic.Interface, query QueryType, event chan ResourceCacheMessage, parentId string) ResourceCacheType {
 	var r ResourceCacheType
 	r.dynamicClient = dynamicClient
 	r.query = query
@@ -74,6 +77,8 @@ func NewResourceCache(dynamicClient dynamic.Interface, query QueryType, event ch
 
 	// listen for events and update cache and propogate them
 	go func() {
+		id := get_myID(parentId, "RC")
+		log.Printf("[%s] Query Watcher Created.\n", id)
 
 		dynamicResourceListChan, err := dynamicClient.Resource(dynamicResource).Namespace(r.query.Namespace).Watch(r.query.listOpts)
 		if err != nil {
@@ -103,7 +108,9 @@ func NewResourceCache(dynamicClient dynamic.Interface, query QueryType, event ch
 				event <- ResourceCacheMessage{Resource: r.Resource, query: r.query}
 
 			case <-r.quit:
-				break
+				log.Printf("[%s] Quit Signal.\n", id)
+				dynamicResourceListChan.Stop()
+				return
 			}
 		}
 	}()
@@ -124,6 +131,7 @@ func (r ResourceCacheType) getName(item map[string]interface{}) string {
 
 type QueryCacheType struct {
 	dynamicClient dynamic.Interface
+	parentId      string
 	Query         map[QueryType]ResourceCacheType
 	Event         chan ResourceCacheMessage
 }
@@ -166,7 +174,7 @@ func (q QueryCacheType) ReadItems(args ...string) []map[string]interface{} {
 	query.listOpts = listOpts
 
 	if _, ok := q.Query[query]; !ok {
-		q.Query[query] = NewResourceCache(q.dynamicClient, query, q.Event)
+		q.Query[query] = NewResourceCache(q.dynamicClient, query, q.Event, q.parentId)
 	}
 	return q.Query[query].Resource
 }
@@ -179,10 +187,13 @@ func (q QueryCacheType) Destroy() {
 		q.DeleteQuery(query)
 	}
 }
-func NewQueryCache(dynamicClient dynamic.Interface) QueryCacheType {
+func NewQueryCache(dynamicClient dynamic.Interface, parentId string) QueryCacheType {
 	var q QueryCacheType
 	q.Query = make(map[QueryType]ResourceCacheType)
 	q.dynamicClient = dynamicClient
 	q.Event = make(chan ResourceCacheMessage)
+	q.parentId = parentId
 	return q
 }
+
+//

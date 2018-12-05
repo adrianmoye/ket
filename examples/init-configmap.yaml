@@ -9,13 +9,6 @@ data:
     {{- $v := get "-n" "default" "configmaps" -}}
     {{- range $v -}}
     {{- if eq .metadata.name "loadbalancer-config" -}}
-    {{- $command := .data.command -}}
-    {{- $lbdata := render .metadata.name .data.template -}}
-    {{- $filedata := readfile .data.configfile -}}
-    {{- if ne $lbdata $filedata -}}
-    {{- log "Updated Loadbalancer Config" .data.configfile -}}
-    {{- writefile .data.configfile $lbdata -}}
-    {{- exec "/bin/sh" "-c" $command -}}
-    {{ end -}}
+    {{- render "lb-renderer" .data.template -}}
     {{- end -}}
     {{- end -}}

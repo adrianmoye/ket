@@ -79,8 +79,10 @@ func main() {
 
 	templateName := "initTemplate"
 	templateText := ""
+	t := ""
+	t = *goTemplate
 
-	if goTemplate == nil {
+	if t == "" {
 		templateText = fmt.Sprintf(initTemplate, *namespace, *name)
 	} else {
 		templateText = *goTemplate

@@ -33,6 +33,7 @@ type templateChild struct {
 	dynamicClient dynamic.Interface
 	parent        chan templateCacheMessage
 	self          chan templateCacheMessage
+	unUsed        bool
 }
 
 func (t templateChild) templateCacheQuery(templateName string, templateText string) string {
@@ -47,6 +48,7 @@ func (t templateChild) templateCacheQuery(templateName string, templateText stri
 		//parentChan:   t.parent,
 	}
 	t.self <- mesg
+	t.unUsed = false
 	res := <-resChan
 	return res.response
 }
@@ -74,8 +76,26 @@ func templateHelper(templateComms templateChild) {
 	id := get_myID(templateComms.parentId, templateComms.name)
 	templateComms.id = id
 	t.dynamicClient = templateComms.dynamicClient
-	q := NewQueryCache(t.dynamicClient)
+	q := NewQueryCache(t.dynamicClient, id)
 	t.child = make(map[string]templateChild)
+
+	resetKids := func() {
+		for kid := range t.child {
+			k := t.child[kid]
+			k.unUsed = true
+			t.child[kid] = k
+		}
+	}
+
+	killKids := func() {
+		for kid := range t.child {
+			if t.child[kid].unUsed {
+				t.child[kid].self <- templateCacheMessage{mType: "quit"}
+				delete(t.child, kid)
+			}
+		}
+	}
+
 	t.fmap = template.FuncMap{
 		"get": func(args ...string) []map[string]interface{} {
 			//log.Printf("get\n")
@@ -87,8 +107,11 @@ func templateHelper(templateComms templateChild) {
 			if _, ok := t.child[tName]; !ok {
 				t.child[tName] = templateCacheConstructor(templateComms, tName)
 			}
-			log.Printf("rendername[%s]\n", tName)
+			log.Printf("[%s] Rendername[%s]\n", id, tName)
 			m := t.child[tName].templateCacheQuery(tName, tText)
+			tc := t.child[tName]
+			tc.unUsed = false
+			t.child[tName] = tc
 			return m
 		},
 		"writefile": func(filename string, data string) string {
@@ -179,7 +202,9 @@ func templateHelper(templateComms templateChild) {
 				templateText = m.templateText
 				//id = get_myID(parentId, templateName)
 				//t.parentMessage = m.parentChan
+				resetKids()
 				r := t.renderFunc(t.fmap, m.templateName, m.templateText)
+				killKids()
 				m.response = r
 				m.resChan <- m
 				curentTemplate = r
@@ -200,7 +225,15 @@ func templateHelper(templateComms templateChild) {
 					templateComms.parent <- mesg
 					log.Printf("[%s] Sent new message from to [%s]\n", id, templateComms.parentId)
 				}
+			case "quit":
+				log.Printf("[%s] Quit signal received.\n", id)
 
+				// kill templates
+				resetKids()
+				killKids()
+				// destroy query cache
+				q.Destroy()
+				return
 			default:
 				log.Printf("[%s]Error: Unknown generatl message type: [%s]", id, m)
 
@@ -228,6 +261,7 @@ func templateHelper(templateComms templateChild) {
 		}
 	}
 }
+
 func templateCacheConstructor(parent templateChild, name string) templateChild {
 	var forChild templateChild
 	forChild.dynamicClient = parent.dynamicClient
