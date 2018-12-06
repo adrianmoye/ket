@@ -71,9 +71,11 @@ func (t templateCache) renderFunc(fmap template.FuncMap, templateName string, te
 
 func templateHelper(templateComms templateChild) {
 	var t templateCache
-	f := make(map[string]fileMonitorComms)
-	fmc := make(chan fileMonitorType, 100)
+
 	id := get_myID(templateComms.parentId, templateComms.name)
+
+	f := NewFileMonitor(id)
+
 	templateComms.id = id
 	t.dynamicClient = templateComms.dynamicClient
 	q := NewQueryCache(t.dynamicClient, id)
@@ -96,14 +98,15 @@ func templateHelper(templateComms templateChild) {
 		}
 	}
 
+	defer func() {
+		f.Destroy()
+	}()
+
 	t.fmap = template.FuncMap{
 		"get": func(args ...string) []map[string]interface{} {
-			//log.Printf("get\n")
 			return q.ReadItems(args...)
 		},
-		// TODO: allow updates of the template, currently you can't modify it :(
 		"render": func(tName string, tText string) string {
-			//		log.Printf("[%s] render request [%s]\n", id, tText)
 			if _, ok := t.child[tName]; !ok {
 				t.child[tName] = templateCacheConstructor(templateComms, tName)
 			}
@@ -116,20 +119,13 @@ func templateHelper(templateComms templateChild) {
 		},
 		"writefile": func(filename string, data string) string {
 			log.Printf("[%s] Writefile [%s]\n", id, filename)
-			if _, ok := f[filename]; !ok {
-				f[filename] = NewFileMonitor(fmc)
-			}
-			f[filename].writefile(filename, data)
+			f.WriteFile(filename, data)
 			log.Printf("[%s] Done Writefile [%s]\n", id, filename)
 			return ""
 		},
 		"readfile": func(filename string) string {
-			log.Printf("[%s] Readfile [%s]\n", id, filename)
-			if _, ok := f[filename]; !ok {
-				f[filename] = NewFileMonitor(fmc)
-			}
 			log.Printf("[%s] Doing Readfile [%s]\n", id, filename)
-			return f[filename].readfile(filename)
+			return f.ReadFile(filename)
 		},
 		"exec": func(command ...string) struct {
 			stdout   string
@@ -149,6 +145,7 @@ func templateHelper(templateComms templateChild) {
 			return ""
 		},
 	}
+
 	// add sprig
 	for k, v := range sprig.FuncMap() {
 		t.fmap[k] = v
@@ -160,7 +157,7 @@ func templateHelper(templateComms templateChild) {
 
 	for {
 		select {
-		case m := <-fmc:
+		case m := <-f.recv:
 			log.Printf("[%s] Update recevied from file[%s]\n", id, m.filename)
 
 			tempTemplate := t.renderFunc(t.fmap, templateName, templateText)
@@ -203,7 +200,9 @@ func templateHelper(templateComms templateChild) {
 				//id = get_myID(parentId, templateName)
 				//t.parentMessage = m.parentChan
 				resetKids()
+				f.SetUnUsed()
 				r := t.renderFunc(t.fmap, m.templateName, m.templateText)
+				f.DeleteUnUsed()
 				killKids()
 				m.response = r
 				m.resChan <- m
@@ -235,7 +234,7 @@ func templateHelper(templateComms templateChild) {
 				q.Destroy()
 				return
 			default:
-				log.Printf("[%s]Error: Unknown generatl message type: [%s]", id, m)
+				log.Printf("[%s]Error: Unknown general message type: [%s]", id, m)
 
 			}
 		case m := <-q.Event:

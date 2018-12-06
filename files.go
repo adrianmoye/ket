@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"io/ioutil"
 	"log"
 
@@ -18,88 +17,80 @@ type fileMonitorType struct {
 	rFchan   chan fileMonitorType
 }
 
-func (f fileMonitorComms) readfile(filename string) string {
+func fileMonitorHelper(f fileMonitorComms, parentId string) {
 
-	var mesg fileMonitorType
-	mesg.filename = filename
-	mesg.event = "read"
-	mesg.rFchan = make(chan fileMonitorType, 100)
+	id := get_myID(parentId, "fm")
 
-	f.send <- mesg
-	response := <-mesg.rFchan
-
-	return response.data
-}
-
-func (f fileMonitorComms) writefile(filename string, data string) {
-	var mesg fileMonitorType
-	mesg.filename = filename
-	mesg.data = data
-	mesg.event = "write"
-	f.send <- mesg
-}
-
-func fileMonitorHelper(f fileMonitorComms) {
 	watcher, err := fsnotify.NewWatcher()
 
 	if err != nil {
-		fmt.Println("ERROR", err)
+		log.Printf("[%s]: ERROR[%s]\n", id, err)
 	}
 	defer watcher.Close()
 
-	filename := ""
-	//	watching := false
+	unUsed := make(map[string]bool)
 
 	for {
 		select {
 		case recv := <-f.recv:
-			if recv.event == "write" {
+			switch recv.event {
+			case "write":
 				bytearray := []byte(recv.data)
 				err := ioutil.WriteFile(recv.filename, bytearray, 0644)
+				unUsed[recv.filename] = false
 				if err != nil {
-					fmt.Println("ERROR", err)
+					log.Printf("[%s]: ERROR[%s]\n", id, err)
 				}
 				if err := watcher.Add(recv.filename); err != nil {
-					fmt.Println("ERROR", err)
+					log.Printf("[%s]: ERROR[%s]\n", id, err)
 				}
-			}
-			if recv.event == "read" {
-				log.Printf("trying read[%s]\n", recv.filename)
+			case "read":
+				log.Printf("[%s]: Trying read[%s]\n", id, recv.filename)
 				data, err := ioutil.ReadFile(recv.filename)
+				unUsed[recv.filename] = false
 				if err != nil {
-					fmt.Println("ERROR", err)
+					log.Printf("[%s]: ERROR[%s]\n", id, err)
 				}
 				recv.data = string(data)
-				//log.Printf("data is[%s]\n", recv.data)
 				recv.rFchan <- recv
 				if err := watcher.Add(recv.filename); err != nil {
-					fmt.Println("ERROR", err)
+					log.Printf("[%s]: ERROR[%s]\n", id, err)
 				}
-				filename = recv.filename
-				/*
-					if filename != recv.filename && !watching {
-						watching = true
-						log.Printf("add notify[%s]\n", recv.filename)
-						filename = recv.filename
-						if err := watcher.Add(recv.filename); err != nil {
-							fmt.Println("ERROR", err)
-						}
-					}*/
+			case "setUnUsed":
+				log.Printf("[%s]: Updating unused\n", id)
+				for item := range unUsed {
+					unUsed[item] = true
+				}
+				recv.rFchan <- recv
+			case "deleteUnUsed":
+				log.Printf("[%s]: Deleting unused\n", id)
+				for item := range unUsed {
+					if unUsed[item] {
+						watcher.Remove(item)
+						delete(unUsed, item)
+					}
+				}
+				recv.rFchan <- recv
+			case "destroy":
+				log.Printf("[%s]: Trying Destroying!\n", id)
+				recv.rFchan <- recv
+				return
+			default:
 			}
 
 		// watch for events
 		case event := <-watcher.Events:
-			log.Printf("EVENT! %#v\n", event)
+			log.Printf("[%s]: EVENT! %#v\n", id, event)
 			var fm fileMonitorType
-			fm.filename = filename
+			fm.filename = event.Name
 			fm.event = "changed"
 			f.send <- fm
 
 			// watch for errors
 		case err := <-watcher.Errors:
-			fmt.Println("ERROR", err)
+			log.Printf("[%s]: ERROR[%s]\n", id, err)
 			var fm fileMonitorType
-			fm.filename = filename
+			//fm.filename = event.Name
 			fm.event = "changed"
 			f.send <- fm
 
@@ -113,15 +104,63 @@ type fileMonitorComms struct {
 	recv chan fileMonitorType
 }
 
-func NewFileMonitor(parentChan chan fileMonitorType) fileMonitorComms {
+func (f fileMonitorComms) ReadFile(filename string) string {
+
+	var mesg fileMonitorType
+	mesg.filename = filename
+	mesg.event = "read"
+	mesg.rFchan = make(chan fileMonitorType, 100)
+
+	f.send <- mesg
+	response := <-mesg.rFchan
+
+	return response.data
+}
+
+func (f fileMonitorComms) WriteFile(filename string, data string) {
+	var mesg fileMonitorType
+	mesg.filename = filename
+	mesg.data = data
+	mesg.event = "write"
+	f.send <- mesg
+}
+
+func (f fileMonitorComms) SetUnUsed() string {
+	var mesg fileMonitorType
+	mesg.event = "setUnUsed"
+	mesg.rFchan = make(chan fileMonitorType, 100)
+	f.send <- mesg
+	response := <-mesg.rFchan
+	return response.event
+}
+
+func (f fileMonitorComms) DeleteUnUsed() string {
+	var mesg fileMonitorType
+	mesg.event = "deleteUnUsed"
+	mesg.rFchan = make(chan fileMonitorType, 100)
+	f.send <- mesg
+	response := <-mesg.rFchan
+	return response.event
+}
+
+func (f fileMonitorComms) Destroy() string {
+	var mesg fileMonitorType
+	mesg.event = "destroy"
+	mesg.rFchan = make(chan fileMonitorType, 100)
+	f.send <- mesg
+	response := <-mesg.rFchan
+	return response.event
+}
+
+func NewFileMonitor(parentId string) fileMonitorComms {
 	var child fileMonitorComms
 	var parent fileMonitorComms
-	child.send = parentChan
+	child.send = make(chan fileMonitorType, 100)
 	child.recv = make(chan fileMonitorType, 100)
 	parent.send = child.recv
 	parent.recv = child.send
 
-	go fileMonitorHelper(child)
+	go fileMonitorHelper(child, parentId)
 
 	return parent
 }
