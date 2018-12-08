@@ -87,7 +87,7 @@ func main() {
 	} else {
 		templateText = *goTemplate
 	}
-	eventLoop(dynamicClient, templateName, templateText)
+	templateInit(dynamicClient, templateName, templateText)
 }
 
 //

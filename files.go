@@ -19,7 +19,7 @@ type fileMonitorType struct {
 
 func fileMonitorHelper(f fileMonitorComms, parentId string) {
 
-	id := get_myID(parentId, "fm")
+	id := get_myID(parentId, "(FM)")
 
 	watcher, err := fsnotify.NewWatcher()
 
@@ -134,7 +134,7 @@ func (f fileMonitorComms) SetUnUsed() string {
 	return response.event
 }
 
-func (f fileMonitorComms) DeleteUnUsed() string {
+func (f fileMonitorComms) DestroyUnUsed() string {
 	var mesg fileMonitorType
 	mesg.event = "deleteUnUsed"
 	mesg.rFchan = make(chan fileMonitorType, 100)
