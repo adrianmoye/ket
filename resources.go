@@ -133,6 +133,7 @@ func ResourceControllerHelper(dynamicClient dynamic.Interface, parent ResourceCo
 				name := getName(t)
 				delete(Resources, name)
 			}
+			log.Printf("[%s] Sending event to parent.\n", id)
 			parent.send <- ResourceCacheMessage{query: query}
 
 		}
@@ -172,6 +173,8 @@ func QueryControllerHelper(dynamicClient dynamic.Interface, parent QueryControll
 
 	for {
 		select {
+		case recv := <-child:
+			parent.send <- recv
 		case recv := <-parent.recv:
 			switch recv.mType {
 			case "Query":
@@ -181,7 +184,7 @@ func QueryControllerHelper(dynamicClient dynamic.Interface, parent QueryControll
 				}
 				recv.Resource = RC[recv.query].ReadItems()
 				//log.Printf("[%s] TCH[%s]\n", id, ret)
-				log.Printf("[%s] sending response to parent.\n", id, recv.Resource)
+				log.Printf("[%s] sending response to parent.\n", id)
 				recv.rFchan <- recv
 				unUsed[recv.query] = false
 
@@ -265,7 +268,7 @@ func (q QueryControllerComms) ReadItems(args ...string) []map[string]interface{}
 	mesg.rFchan = make(chan ResourceCacheMessage, 100)
 	q.send <- mesg
 	response := <-mesg.rFchan
-	log.Printf("Received query result[%s]\n,", response)
+	log.Printf("Received query result[%s]\n,")
 	return response.Resource
 }
 

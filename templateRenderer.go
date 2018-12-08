@@ -121,7 +121,13 @@ func templateRendererHelper(dynamicClient dynamic.Interface, parent templateRend
 
 	renderChecker := func() {
 
+		tc.SetUnUsed()
+		f.SetUnUsed()
+		q.SetUnUsed()
 		tempTemplate := renderFunc(fmap, name, templateText)
+		tc.DestroyUnUsed()
+		f.DestroyUnUsed()
+		q.DestroyUnUsed()
 
 		if tempTemplate != curentTemplate {
 
