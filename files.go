@@ -62,7 +62,7 @@ func fileMonitorHelper(f fileMonitorComms, parentId string) {
 					unUsed[item] = true
 				}
 				recv.rFchan <- recv
-			case "deleteUnUsed":
+			case "destroyUnUsed":
 				log.Printf("[%s]: Deleting unused\n", id)
 				for item := range unUsed {
 					if unUsed[item] {
@@ -136,7 +136,7 @@ func (f fileMonitorComms) SetUnUsed() string {
 
 func (f fileMonitorComms) DestroyUnUsed() string {
 	var mesg fileMonitorType
-	mesg.event = "deleteUnUsed"
+	mesg.event = "destroyUnUsed"
 	mesg.rFchan = make(chan fileMonitorType, 100)
 	f.send <- mesg
 	response := <-mesg.rFchan

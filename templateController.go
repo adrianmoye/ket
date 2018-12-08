@@ -25,7 +25,7 @@ type templateControllerComms struct {
 
 func templateControllerHelper(dynamicClient dynamic.Interface, parent templateControllerComms, parentId string, name string) {
 
-	id := get_myID(parentId, "(TC)"+name)
+	id := get_myID(parentId, "(TC)")
 	log.Printf("[%s] New TC\n", id)
 
 	childMessage := make(chan templateRendererType, 100)
@@ -58,16 +58,18 @@ func templateControllerHelper(dynamicClient dynamic.Interface, parent templateCo
 					unUsed[item] = true
 				}
 				recv.rFchan <- recv
-			case "deleteUnUsed":
-				log.Printf("[%s]: Deleting unused.\n", id)
+			case "destroyUnUsed":
+				log.Printf("[%s]: (1643)Receive destroy unused.\n", id)
 				for item := range unUsed {
+					log.Printf("[%s]: Check [%s].\n", id, item)
 					if unUsed[item] {
+						log.Printf("[%s]: Sending destroy [%s].\n", id, item)
 						templates[item].Destroy()
 						delete(templates, item)
 						delete(unUsed, item)
 					}
 				}
-				log.Printf("[%s]: Finished deleting unused.\n", id)
+				log.Printf("[%s]: Finished Destroy unused.\n", id)
 				recv.rFchan <- recv
 			case "destroy":
 				log.Printf("[%s]: Destroying Children.\n", id)
@@ -113,7 +115,8 @@ func (t templateControllerComms) SetUnUsed() string {
 
 func (t templateControllerComms) DestroyUnUsed() string {
 	var mesg templateControllerType
-	mesg.event = "deleteUnUsed"
+	log.Printf("[%s]: Sending destroy unused[%s].\n", t)
+	mesg.event = "destroyUnUsed"
 	mesg.rFchan = make(chan templateControllerType, 100)
 	t.send <- mesg
 	response := <-mesg.rFchan
@@ -121,6 +124,16 @@ func (t templateControllerComms) DestroyUnUsed() string {
 }
 
 func (t templateControllerComms) Destroy() string {
+	/*
+	   type templateControllerType struct {
+	           name   string
+	           value  string
+	           event  string
+	           rFchan chan templateControllerType
+	   }
+	*/
+
+	log.Printf("[%s]: Sending destroy [%s].\n", t)
 	var mesg templateControllerType
 	mesg.event = "destroy"
 	mesg.rFchan = make(chan templateControllerType, 100)

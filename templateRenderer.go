@@ -38,7 +38,7 @@ func (t templateRendererControllerComms) Render(name string, val string) string 
 
 func (t templateRendererControllerComms) Destroy() string {
 	mesg := templateRendererType{
-		mType:   "quit",
+		mType:   "destroy",
 		resChan: make(chan templateRendererType, 10),
 	}
 	t.send <- mesg
@@ -70,7 +70,8 @@ func templateRendererHelper(dynamicClient dynamic.Interface, parent templateRend
 
 	// func NewTemplateController(dynamicClient dynamic.Interface, parentId string, name string) templateControllerComms {
 	tc := NewTemplateController(dynamicClient, id, name)
-	q := NewQueryCache(dynamicClient, id)
+	//	q := NewQueryCache(dynamicClient, id)
+	q := NewQueryController(dynamicClient, id)
 	f := NewFileMonitor(id)
 
 	templateText := ""
@@ -152,6 +153,7 @@ func templateRendererHelper(dynamicClient dynamic.Interface, parent templateRend
 
 				tc.SetUnUsed()
 				f.SetUnUsed()
+				q.SetUnUsed()
 
 				r := renderFunc(fmap, name, templateText)
 
@@ -161,9 +163,10 @@ func templateRendererHelper(dynamicClient dynamic.Interface, parent templateRend
 
 				tc.DestroyUnUsed()
 				f.DestroyUnUsed()
+				q.DestroyUnUsed()
 
-			case "quit":
-				log.Printf("[%s] Quit signal received.\n", id)
+			case "destroy":
+				log.Printf("[%s] Destroy signal received.\n", id)
 
 				// kill all
 				tc.Destroy()
@@ -191,7 +194,7 @@ func templateRendererHelper(dynamicClient dynamic.Interface, parent templateRend
 
 				renderChecker()
 			}
-		case recv := <-q.Event:
+		case recv := <-q.recv:
 			recv = ResourceCacheMessage{}
 			log.Printf("[%s] Message Received from query child[%s]\n.", id, recv)
 

@@ -24,102 +24,42 @@ type QueryType struct {
 }
 
 type ResourceCacheMessage struct {
+	mType    string
 	Resource []map[string]interface{}
 	query    QueryType
-}
-type ResourceCacheType struct {
-	id            string
-	Resource      []map[string]interface{}
-	dynamicClient dynamic.Interface
-	query         QueryType
-	quit          chan string
+	rFchan   chan ResourceCacheMessage
 }
 
-func NewResourceCache(dynamicClient dynamic.Interface, query QueryType, event chan ResourceCacheMessage, parentId string) ResourceCacheType {
-	var r ResourceCacheType
-	r.dynamicClient = dynamicClient
-	r.query = query
-	r.quit = make(chan string)
-	Resources := make(map[string]map[string]interface{})
+/*
+ * Resource Controller
+ */
 
-	dynamicResource := query.qSchema
-	dynamicResourceList, err := dynamicClient.Resource(dynamicResource).Namespace(r.query.Namespace).List(r.query.listOpts)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	// lets first populate the cache, then we can watch it
-	for _, dR := range dynamicResourceList.Items {
-		//res := reflect.ValueOf(dR).Field(0).Interface().(unstructured.Unstructured) //(map[string]interface{})
-		name := r.getName(dR.Object)
-		Resources[name] = dR.Object //reflect.ValueOf(dR).Field(0).Interface().(map[string]interface{})
-	}
-
-	// sort the resource map into an ordered array so we can
-	// get deterministic outputs in the templates
-	GetItems := func(Resources map[string]map[string]interface{}) []map[string]interface{} {
-		var keys []string
-		for key := range Resources {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		var retval []map[string]interface{}
-		for _, key := range keys {
-			//	v := *reflect.ValueOf(Resources[key]).interface().(*map[string]interface{})
-			//	log.Printf("\ntype\n[%s][%s]\n\n\n", key, reflect.ValueOf(Resources[key]).Type())
-			//	log.Printf("\nval\n[%s][%s]\n\n\n", key, v)
-			retval = append(retval, Resources[key])
-		}
-		return retval
-	}
-
-	r.Resource = GetItems(Resources)
-
-	// listen for events and update cache and propogate them
-	go func() {
-		id := get_myID(parentId, "RC")
-		log.Printf("[%s] Query Watcher Created.\n", id)
-
-		dynamicResourceListChan, err := dynamicClient.Resource(dynamicResource).Namespace(r.query.Namespace).Watch(r.query.listOpts)
-		if err != nil {
-			panic(err.Error())
-		}
-
-		c := dynamicResourceListChan.ResultChan()
-		for {
-			select {
-			case e := <-c:
-				//		log.Printf("Qry: [%s]\n", query)
-				eventType := reflect.ValueOf(e).Field(0).Interface().(watch.EventType)
-				//		log.Printf("New event: [%s]\n", reflect.ValueOf(e).Type())
-				ta := *reflect.ValueOf(e).Field(1).Interface().(*unstructured.Unstructured) //.(*map[string]interface{}) //(*unstructured.Unstructured)
-				t := ta.Object
-				if (eventType == "ADDED") || (eventType == "MODIFIED") {
-					//			r.updateItem(t.Object)
-					name := r.getName(t)
-					Resources[name] = t
-				}
-				if eventType == "DELETED" {
-					//				r.deleteItem(t.Object)
-					name := r.getName(t)
-					delete(Resources, name)
-				}
-				r.Resource = GetItems(Resources)
-				event <- ResourceCacheMessage{Resource: r.Resource, query: r.query}
-
-			case <-r.quit:
-				log.Printf("[%s] Quit Signal.\n", id)
-				dynamicResourceListChan.Stop()
-				return
-			}
-		}
-	}()
-	return r
+type ResourceControllerComms struct {
+	send chan ResourceCacheMessage
+	recv chan ResourceCacheMessage
 }
-func (r ResourceCacheType) Destroy() {
-	close(r.quit)
+
+func (r ResourceControllerComms) Destroy() string {
+	log.Printf("[%s]: Sending destroy [%s].\n", r)
+	var mesg ResourceCacheMessage
+	mesg.mType = "Destroy"
+	mesg.rFchan = make(chan ResourceCacheMessage, 100)
+	r.send <- mesg
+	response := <-mesg.rFchan
+	return response.mType
 }
-func (r ResourceCacheType) getName(item map[string]interface{}) string {
+
+func (r ResourceControllerComms) ReadItems() []map[string]interface{} {
+	log.Printf("[%s]: Sending destroy [%s].\n", r)
+	var mesg ResourceCacheMessage
+	mesg.mType = "Query"
+	mesg.rFchan = make(chan ResourceCacheMessage, 100)
+	r.send <- mesg
+	response := <-mesg.rFchan
+	return response.Resource
+}
+
+func getName(item map[string]interface{}) string {
 	name := ""
 	metadata := item["metadata"].(map[string]interface{})
 	if _, ok := metadata["namespace"]; ok {
@@ -129,17 +69,163 @@ func (r ResourceCacheType) getName(item map[string]interface{}) string {
 	return name
 }
 
-type QueryCacheType struct {
-	dynamicClient dynamic.Interface
-	parentId      string
-	Query         map[QueryType]ResourceCacheType
-	Event         chan ResourceCacheMessage
+func ResourceControllerHelper(dynamicClient dynamic.Interface, parent ResourceControllerComms, parentId string, query QueryType) {
+	id := get_myID(parentId, "(QC)")
+	log.Printf("[%s] New RC: [%s]\n", id, query)
+
+	Resources := make(map[string]map[string]interface{})
+
+	dynamicResource := query.qSchema
+	dynamicResourceList, err := dynamicClient.Resource(dynamicResource).Namespace(query.Namespace).List(query.listOpts)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	// lets first populate the cache, then we can watch it
+	for _, dR := range dynamicResourceList.Items {
+		name := getName(dR.Object)
+		Resources[name] = dR.Object //reflect.ValueOf(dR).Field(0).Interface().(map[string]interface{})
+	}
+
+	dynamicResourceListChan, err := dynamicClient.Resource(dynamicResource).Namespace(query.Namespace).Watch(query.listOpts)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	watcher := dynamicResourceListChan.ResultChan()
+	for {
+		select {
+		case recv := <-parent.recv:
+			switch recv.mType {
+			case "Query":
+
+				var keys []string
+				for key := range Resources {
+					keys = append(keys, key)
+				}
+				sort.Strings(keys)
+				var retval []map[string]interface{}
+				for _, key := range keys {
+					retval = append(retval, Resources[key])
+				}
+				recv.Resource = retval
+
+				recv.rFchan <- recv
+
+			case "Destroy":
+				log.Printf("[%s] Quit Signal.\n", id)
+				dynamicResourceListChan.Stop()
+				recv.rFchan <- recv
+				return
+			default:
+			}
+
+		case e := <-watcher:
+			//		log.Printf("Qry: [%s]\n", query)
+			eventType := reflect.ValueOf(e).Field(0).Interface().(watch.EventType)
+			ta := *reflect.ValueOf(e).Field(1).Interface().(*unstructured.Unstructured) //.(*map[string]interface{}) //(*unstructured.Unstructured)
+			t := ta.Object
+			if (eventType == "ADDED") || (eventType == "MODIFIED") {
+				name := getName(t)
+				Resources[name] = t
+			}
+			if eventType == "DELETED" {
+				name := getName(t)
+				delete(Resources, name)
+			}
+			parent.send <- ResourceCacheMessage{query: query}
+
+		}
+	}
 }
 
-//func (q QueryCacheType) ReadItems(query QueryType) []map[string]interface{} {
-func (q QueryCacheType) ReadItems(args ...string) []map[string]interface{} {
-	// return q.ReadItems(QueryType{qSchema: schema.GroupVersionResource{Version: "v1", Resource: resource}}
+func NewResourceController(dynamicClient dynamic.Interface, parentId string, parentChan chan ResourceCacheMessage, query QueryType) ResourceControllerComms {
 
+	var child ResourceControllerComms
+	var parent ResourceControllerComms
+	child.send = parentChan
+	child.recv = make(chan ResourceCacheMessage, 100)
+	parent.send = child.recv
+	parent.recv = child.send
+
+	go ResourceControllerHelper(dynamicClient, child, parentId, query)
+
+	return parent
+}
+
+/*
+ * Query Controller
+ */
+
+type QueryControllerComms struct {
+	send chan ResourceCacheMessage
+	recv chan ResourceCacheMessage
+}
+
+func QueryControllerHelper(dynamicClient dynamic.Interface, parent QueryControllerComms, parentId string) {
+	id := get_myID(parentId, "(QC)")
+	log.Printf("[%s] New QC\n", id)
+
+	child := make(chan ResourceCacheMessage, 100)
+	RC := make(map[QueryType]ResourceControllerComms)
+	unUsed := make(map[QueryType]bool)
+
+	for {
+		select {
+		case recv := <-parent.recv:
+			switch recv.mType {
+			case "Query":
+				log.Printf("[%s] Received message from parent.\n", id)
+				if _, ok := RC[recv.query]; !ok {
+					RC[recv.query] = NewResourceController(dynamicClient, id, child, recv.query)
+				}
+				recv.Resource = RC[recv.query].ReadItems()
+				//log.Printf("[%s] TCH[%s]\n", id, ret)
+				log.Printf("[%s] sending response to parent.\n", id, recv.Resource)
+				recv.rFchan <- recv
+				unUsed[recv.query] = false
+
+			case "SetUnUsed":
+				log.Printf("[%s]: Updating unused.\n", id)
+				for item := range unUsed {
+					unUsed[item] = true
+				}
+				recv.rFchan <- recv
+			case "DestroyUnUsed":
+				for item := range unUsed {
+					log.Printf("[%s]: Check [%s].\n", id, item)
+					if unUsed[item] {
+						log.Printf("[%s]: Sending destroy [%s].\n", id, item)
+						RC[item].Destroy()
+						delete(RC, item)
+						delete(unUsed, item)
+					}
+				}
+				log.Printf("[%s]: Finished Destroy unused.\n", id)
+				recv.rFchan <- recv
+
+			case "Destroy":
+				log.Printf("[%s]: Received Destroying.\n", id)
+				for item := range unUsed {
+					log.Printf("[%s]: Check [%s].\n", id, item)
+					log.Printf("[%s]: Sending destroy [%s].\n", id, item)
+					RC[item].Destroy()
+					delete(RC, item)
+					delete(unUsed, item)
+				}
+				log.Printf("[%s]: Finished Destroying.\n", id)
+				recv.rFchan <- recv
+				return
+			default:
+			}
+		}
+	}
+
+}
+
+func (q QueryControllerComms) ReadItems(args ...string) []map[string]interface{} {
+
+	log.Printf("[%s]: Sending ReadItems [%s].\n")
 	var query QueryType
 	//var res_name string
 	//var labels string
@@ -173,27 +259,57 @@ func (q QueryCacheType) ReadItems(args ...string) []map[string]interface{} {
 	query.qSchema = qSchema
 	query.listOpts = listOpts
 
-	if _, ok := q.Query[query]; !ok {
-		q.Query[query] = NewResourceCache(q.dynamicClient, query, q.Event, q.parentId)
-	}
-	return q.Query[query].Resource
+	var mesg ResourceCacheMessage
+	mesg.mType = "Query"
+	mesg.query = query
+	mesg.rFchan = make(chan ResourceCacheMessage, 100)
+	q.send <- mesg
+	response := <-mesg.rFchan
+	log.Printf("Received query result[%s]\n,", response)
+	return response.Resource
 }
-func (q QueryCacheType) DeleteQuery(query QueryType) {
-	q.Query[query].Destroy()
-	delete(q.Query, query)
+
+func (q QueryControllerComms) SetUnUsed() string {
+	log.Printf("[%s]: Sending SetUnUsed [%s].\n", q)
+	var mesg ResourceCacheMessage
+	mesg.mType = "SetUnUsed"
+	mesg.rFchan = make(chan ResourceCacheMessage, 100)
+	q.send <- mesg
+	response := <-mesg.rFchan
+	return response.mType
 }
-func (q QueryCacheType) Destroy() {
-	for query := range q.Query {
-		q.DeleteQuery(query)
-	}
+
+func (q QueryControllerComms) DestroyUnUsed() string {
+	log.Printf("[%s]: Sending DestroyUnUsed [%s].\n", q)
+	var mesg ResourceCacheMessage
+	mesg.mType = "DestroyUnUsed"
+	mesg.rFchan = make(chan ResourceCacheMessage, 100)
+	q.send <- mesg
+	response := <-mesg.rFchan
+	return response.mType
 }
-func NewQueryCache(dynamicClient dynamic.Interface, parentId string) QueryCacheType {
-	var q QueryCacheType
-	q.Query = make(map[QueryType]ResourceCacheType)
-	q.dynamicClient = dynamicClient
-	q.Event = make(chan ResourceCacheMessage)
-	q.parentId = parentId
-	return q
+
+func (q QueryControllerComms) Destroy() string {
+	log.Printf("[%s]: Sending destroy [%s].\n", q)
+	var mesg ResourceCacheMessage
+	mesg.mType = "Destroy"
+	mesg.rFchan = make(chan ResourceCacheMessage, 100)
+	q.send <- mesg
+	response := <-mesg.rFchan
+	return response.mType
+}
+
+func NewQueryController(dynamicClient dynamic.Interface, parentId string) QueryControllerComms {
+	var child QueryControllerComms
+	var parent QueryControllerComms
+	child.send = make(chan ResourceCacheMessage, 100)
+	child.recv = make(chan ResourceCacheMessage, 100)
+	parent.send = child.recv
+	parent.recv = child.send
+
+	go QueryControllerHelper(dynamicClient, child, parentId)
+
+	return parent
 }
 
 //
