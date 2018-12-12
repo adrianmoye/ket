@@ -5,8 +5,6 @@ import (
 	"github.com/Masterminds/sprig"
 	"log"
 	"text/template"
-
-	"k8s.io/client-go/dynamic"
 )
 
 type templateRendererType struct {
@@ -63,15 +61,15 @@ func renderFunc(fmap template.FuncMap, templateName string, templateText string)
 }
 
 // this is the main template renderer
-func templateRendererHelper(dynamicClient dynamic.Interface, parent templateRendererControllerComms, parentId string, name string) {
+func templateRendererHelper(kc kubeCli, parent templateRendererControllerComms, parentId string, name string) {
 
 	id := get_myID(parentId, "(TR)"+name)
 	log.Printf("[%s] New TR.\n", id)
 
-	// func NewTemplateController(dynamicClient dynamic.Interface, parentId string, name string) templateControllerComms {
-	tc := NewTemplateController(dynamicClient, id, name)
-	//	q := NewQueryCache(dynamicClient, id)
-	q := NewQueryController(dynamicClient, id)
+	// func NewTemplateController(kc kubeCli, parentId string, name string) templateControllerComms {
+	tc := NewTemplateController(kc, id, name)
+	//	q := NewQueryCache(kubeCli, id)
+	q := NewQueryController(kc, id)
 	f := NewFileMonitor(id)
 
 	templateText := ""
@@ -214,7 +212,7 @@ func templateRendererHelper(dynamicClient dynamic.Interface, parent templateRend
 	}
 }
 
-func templateRendererCacheConstructor(dynamicClient dynamic.Interface, parentId string, name string, childChan chan templateRendererType) templateRendererControllerComms {
+func templateRendererCacheConstructor(kc kubeCli, parentId string, name string, childChan chan templateRendererType) templateRendererControllerComms {
 	var child templateRendererControllerComms
 	var parent templateRendererControllerComms
 	child.send = childChan
@@ -222,7 +220,7 @@ func templateRendererCacheConstructor(dynamicClient dynamic.Interface, parentId 
 	parent.send = child.recv
 	parent.recv = child.send
 
-	go templateRendererHelper(dynamicClient, child, parentId, name)
+	go templateRendererHelper(kc, child, parentId, name)
 
 	return parent
 }

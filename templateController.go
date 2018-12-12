@@ -2,8 +2,6 @@ package main
 
 import (
 	"log"
-
-	"k8s.io/client-go/dynamic"
 )
 
 /*
@@ -23,7 +21,7 @@ type templateControllerComms struct {
 	recv chan templateControllerType
 }
 
-func templateControllerHelper(dynamicClient dynamic.Interface, parent templateControllerComms, parentId string, name string) {
+func templateControllerHelper(kc kubeCli, parent templateControllerComms, parentId string, name string) {
 
 	id := get_myID(parentId, "(TC)")
 	log.Printf("[%s] New TC\n", id)
@@ -45,7 +43,7 @@ func templateControllerHelper(dynamicClient dynamic.Interface, parent templateCo
 			case "render":
 				log.Printf("[%s] Received message from parent.\n", id)
 				if _, ok := templates[recv.name]; !ok {
-					templates[recv.name] = templateRendererCacheConstructor(dynamicClient, id, recv.name, childMessage)
+					templates[recv.name] = templateRendererCacheConstructor(kc, id, recv.name, childMessage)
 				}
 				var ret templateControllerType
 				ret.value = templates[recv.name].Render(recv.name, recv.value)
@@ -142,7 +140,7 @@ func (t templateControllerComms) Destroy() string {
 	return response.event
 }
 
-func NewTemplateController(dynamicClient dynamic.Interface, parentId string, name string) templateControllerComms {
+func NewTemplateController(kc kubeCli, parentId string, name string) templateControllerComms {
 	var child templateControllerComms
 	var parent templateControllerComms
 	child.send = make(chan templateControllerType, 100)
@@ -150,7 +148,7 @@ func NewTemplateController(dynamicClient dynamic.Interface, parentId string, nam
 	parent.send = child.recv
 	parent.recv = child.send
 
-	go templateControllerHelper(dynamicClient, child, parentId, name)
+	go templateControllerHelper(kc, child, parentId, name)
 
 	return parent
 }

@@ -2,16 +2,14 @@ package main
 
 import (
 	"log"
-
-	"k8s.io/client-go/dynamic"
 )
 
-func templateInit(dynamicClient dynamic.Interface, templateName string, templateText string) {
+func templateInit(kc kubeCli, templateName string, templateText string) {
 
 	id := get_myID("", "main")
 
 	/*
-			type templateCacheMessage struct {
+		type templateCacheMessage struct {
 		        templateName string
 		        templateText string
 		        mType        string
@@ -35,7 +33,7 @@ func templateInit(dynamicClient dynamic.Interface, templateName string, template
 		go tf()
 	*/
 
-	tc := NewTemplateController(dynamicClient, id, "main")
+	tc := NewTemplateController(kc, id, "main")
 
 	resp := tc.Render(templateName, templateText)
 

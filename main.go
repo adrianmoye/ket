@@ -8,11 +8,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/tools/clientcmd"
-	//"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 )
 
 func homeDir() string {
@@ -52,21 +47,7 @@ func main() {
 
 	flag.Parse()
 
-	// use the current context in kubeconfig
-	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
-	if err != nil {
-		// hopefully this'll give us an incluster config if that doesn't work
-		config, err = rest.InClusterConfig()
-		if err != nil {
-			panic(err.Error())
-		}
-	}
-
-	//  Create a Dynamic Client to interface with CRDs.
-	dynamicClient, err := dynamic.NewForConfig(config)
-	if err != nil {
-		panic(err.Error())
-	}
+	kc := NewApiCon(kubeconfig)
 
 	const initTemplate = `
 {{- $v := get "-n" "%s" "configmaps" -}}
@@ -87,7 +68,7 @@ func main() {
 	} else {
 		templateText = *goTemplate
 	}
-	templateInit(dynamicClient, templateName, templateText)
+	templateInit(kc, templateName, templateText)
 }
 
 //

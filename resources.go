@@ -9,11 +9,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
-
 	// https://stackoverflow.com/questions/47116811/client-go-parse-kubernetes-json-files-to-k8s-structures
 	//	discocache "k8s.io/client-go/discovery/cached"
 	//"k8s.io/client-go/discovery"
-	"k8s.io/client-go/dynamic"
+	//	"k8s.io/client-go/dynamic"
 )
 
 type QueryType struct {
@@ -69,14 +68,16 @@ func getName(item map[string]interface{}) string {
 	return name
 }
 
-func ResourceControllerHelper(dynamicClient dynamic.Interface, parent ResourceControllerComms, parentId string, query QueryType) {
+func ResourceControllerHelper(kc kubeCli, parent ResourceControllerComms, parentId string, query QueryType) {
 	id := get_myID(parentId, "(QC)")
 	log.Printf("[%s] New RC: [%s]\n", id, query)
 
 	Resources := make(map[string]map[string]interface{})
 
+	dc := kc.getDc()
+
 	dynamicResource := query.qSchema
-	dynamicResourceList, err := dynamicClient.Resource(dynamicResource).Namespace(query.Namespace).List(query.listOpts)
+	dynamicResourceList, err := dc.Resource(dynamicResource).Namespace(query.Namespace).List(query.listOpts)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -87,7 +88,7 @@ func ResourceControllerHelper(dynamicClient dynamic.Interface, parent ResourceCo
 		Resources[name] = dR.Object //reflect.ValueOf(dR).Field(0).Interface().(map[string]interface{})
 	}
 
-	dynamicResourceListChan, err := dynamicClient.Resource(dynamicResource).Namespace(query.Namespace).Watch(query.listOpts)
+	dynamicResourceListChan, err := dc.Resource(dynamicResource).Namespace(query.Namespace).Watch(query.listOpts)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -140,7 +141,7 @@ func ResourceControllerHelper(dynamicClient dynamic.Interface, parent ResourceCo
 	}
 }
 
-func NewResourceController(dynamicClient dynamic.Interface, parentId string, parentChan chan ResourceCacheMessage, query QueryType) ResourceControllerComms {
+func NewResourceController(kc kubeCli, parentId string, parentChan chan ResourceCacheMessage, query QueryType) ResourceControllerComms {
 
 	var child ResourceControllerComms
 	var parent ResourceControllerComms
@@ -149,7 +150,7 @@ func NewResourceController(dynamicClient dynamic.Interface, parentId string, par
 	parent.send = child.recv
 	parent.recv = child.send
 
-	go ResourceControllerHelper(dynamicClient, child, parentId, query)
+	go ResourceControllerHelper(kc, child, parentId, query)
 
 	return parent
 }
@@ -163,7 +164,7 @@ type QueryControllerComms struct {
 	recv chan ResourceCacheMessage
 }
 
-func QueryControllerHelper(dynamicClient dynamic.Interface, parent QueryControllerComms, parentId string) {
+func QueryControllerHelper(kc kubeCli, parent QueryControllerComms, parentId string) {
 	id := get_myID(parentId, "(QC)")
 	log.Printf("[%s] New QC\n", id)
 
@@ -180,7 +181,7 @@ func QueryControllerHelper(dynamicClient dynamic.Interface, parent QueryControll
 			case "Query":
 				log.Printf("[%s] Received message from parent.\n", id)
 				if _, ok := RC[recv.query]; !ok {
-					RC[recv.query] = NewResourceController(dynamicClient, id, child, recv.query)
+					RC[recv.query] = NewResourceController(kc, id, child, recv.query)
 				}
 				recv.Resource = RC[recv.query].ReadItems()
 				//log.Printf("[%s] TCH[%s]\n", id, ret)
@@ -302,7 +303,7 @@ func (q QueryControllerComms) Destroy() string {
 	return response.mType
 }
 
-func NewQueryController(dynamicClient dynamic.Interface, parentId string) QueryControllerComms {
+func NewQueryController(kc kubeCli, parentId string) QueryControllerComms {
 	var child QueryControllerComms
 	var parent QueryControllerComms
 	child.send = make(chan ResourceCacheMessage, 100)
@@ -310,7 +311,7 @@ func NewQueryController(dynamicClient dynamic.Interface, parentId string) QueryC
 	parent.send = child.recv
 	parent.recv = child.send
 
-	go QueryControllerHelper(dynamicClient, child, parentId)
+	go QueryControllerHelper(kc, child, parentId)
 
 	return parent
 }
