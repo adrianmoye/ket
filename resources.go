@@ -9,10 +9,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
-	// https://stackoverflow.com/questions/47116811/client-go-parse-kubernetes-json-files-to-k8s-structures
-	//	discocache "k8s.io/client-go/discovery/cached"
-	//"k8s.io/client-go/discovery"
-	//	"k8s.io/client-go/dynamic"
 )
 
 type QueryType struct {
@@ -74,26 +70,16 @@ func ResourceControllerHelper(kc kubeCli, parent ResourceControllerComms, parent
 
 	Resources := make(map[string]map[string]interface{})
 
-	dc := kc.getDc()
-
-	dynamicResource := query.qSchema
-	dynamicResourceList, err := dc.Resource(dynamicResource).Namespace(query.Namespace).List(query.listOpts)
-	if err != nil {
-		panic(err.Error())
-	}
-
 	// lets first populate the cache, then we can watch it
-	for _, dR := range dynamicResourceList.Items {
+	ResourceList := kc.List(query)
+	for _, dR := range ResourceList.Items {
 		name := getName(dR.Object)
 		Resources[name] = dR.Object //reflect.ValueOf(dR).Field(0).Interface().(map[string]interface{})
 	}
 
-	dynamicResourceListChan, err := dc.Resource(dynamicResource).Namespace(query.Namespace).Watch(query.listOpts)
-	if err != nil {
-		panic(err.Error())
-	}
+	ResourceWatcherChan := kc.Watch(query)
 
-	watcher := dynamicResourceListChan.ResultChan()
+	watcher := ResourceWatcherChan.ResultChan()
 	for {
 		select {
 		case recv := <-parent.recv:
@@ -115,7 +101,7 @@ func ResourceControllerHelper(kc kubeCli, parent ResourceControllerComms, parent
 
 			case "Destroy":
 				log.Printf("[%s] Quit Signal.\n", id)
-				dynamicResourceListChan.Stop()
+				ResourceWatcherChan.Stop()
 				recv.rFchan <- recv
 				return
 			default:
