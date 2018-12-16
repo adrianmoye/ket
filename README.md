@@ -31,6 +31,8 @@ provide `"-n" $namespace`.
 definition. Returns nil on failure. Returns the object on success.
 * `<value> := update <yaml>`: Updates a resource according to a yaml
 definition. Returns nil on failure. Returns the object on success.
+* `delete ["-n <namespace>] <resource type> <resource name>`: Deletes
+desired resource.
 * `render <name> <template text>`: This will render a sub
 template, with some value you've acquired with other queries,
 returning a string.

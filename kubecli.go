@@ -161,8 +161,45 @@ func (c kubeCli) Patch(def string) map[string]interface{} {
 	return unstruct.Object
 }
 
-func (c kubeCli) Delete(def string) error {
-	return nil
+func (c kubeCli) Delete(args ...string) string {
+	var arg string
+	var listOpts metav1.ListOptions
+	qSchema := schema.GroupVersionResource{
+		Version: "v1",
+	}
+
+	res_name := ""
+	namespace := ""
+	rescount := 0
+
+	for len(args) > 0 {
+		arg, args = args[0], args[1:]
+		switch arg {
+		case "-n":
+			namespace, args = args[0], args[1:]
+		case "-l":
+			listOpts.LabelSelector, args = args[0], args[1:]
+		default:
+			switch rescount {
+			case 0:
+				qSchema.Resource = arg
+			case 1:
+				res_name = arg
+			}
+			rescount++
+		}
+
+	}
+	var deleteOptions metav1.DeleteOptions
+	//deleteOptions = make(metav1.DeleteOptions)
+	err := c.dc.Resource(qSchema).Namespace(namespace).Delete(res_name, &deleteOptions)
+
+	if err != nil {
+		log.Printf("ERROR DELETE ns[%s] resname[%s] qschema[%s]\n", namespace, res_name, qSchema)
+		log.Printf("ERROR, can't delete resource: [%s]\n", err.Error())
+	}
+
+	return ""
 }
 
 func (c kubeCli) List(query QueryType) *unstructured.UnstructuredList {
@@ -222,31 +259,34 @@ func NewApiCon(kubeconfig *string) kubeCli {
 	}
 	c.ag = apigroups
 
-	//restmapper := discovery.NewRESTMapper(apigroups,meta.InterfacesForUnstructured)
 	rm := restmapper.NewDiscoveryRESTMapper(c.ag)
 	c.rm = rm
+	/*
+	   	const testConfigmap = `
+	   apiVersion: v1
+	   kind: ConfigMap
+	   metadata:
+	     name: testconfigmap
+	     namespace: default
+	   data:
+	     some: "data goes here."
+	   `
+	   	_ = c.Create(testConfigmap)
 
-	const testConfigmap = `
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: testconfigmap
-  namespace: default
-data:
-  some: "data goes here."
-`
-	_ = c.Create(testConfigmap)
+	   	const testConfigmap2 = `
+	   apiVersion: v1
+	   kind: ConfigMap
+	   metadata:
+	     name: testconfigmap
+	     namespace: default
+	   data:
+	     some: "updated data goes here."
+	   `
+	   	_ = c.Update(testConfigmap2)
 
-	const testConfigmap2 = `
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: testconfigmap
-  namespace: default
-data:
-  some: "updated data goes here."
-`
-	_ = c.Update(testConfigmap2)
+	   	_ = c.Delete("-n", "default", "configmaps", "testconfigmap")
+
+	*/
 
 	return c
 }
