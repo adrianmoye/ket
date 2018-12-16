@@ -27,6 +27,10 @@ provide the following primitives to allow you to do this:
 * `<value> := get ["-n" <namespace>] <resource type>`: This provides
 an ordered list of all of the matching resources. Optionally
 provide `"-n" $namespace`.
+* `<value> := create <yaml>`: Creates a resource according to a yaml
+definition. Returns nil on failure. Returns the object on success.
+* `<value> := update <yaml>`: Updates a resource according to a yaml
+definition. Returns nil on failure. Returns the object on success.
 * `render <name> <template text>`: This will render a sub
 template, with some value you've acquired with other queries,
 returning a string.

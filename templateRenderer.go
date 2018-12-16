@@ -79,6 +79,12 @@ func templateRendererHelper(kc kubeCli, parent templateRendererControllerComms, 
 		"get": func(args ...string) []map[string]interface{} {
 			return q.ReadItems(args...)
 		},
+		"create": func(yamlval string) map[string]interface{} {
+			return kc.Create(yamlval)
+		},
+		"update": func(yamlval string) map[string]interface{} {
+			return kc.Update(yamlval)
+		},
 		"render": func(tName string, tText string) string {
 			log.Printf("[%s] Try to eval: [%s]\n", id, tName)
 			return tc.Render(tName, tText)

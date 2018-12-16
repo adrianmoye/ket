@@ -38,8 +38,7 @@ func (c kubeCli) getDc() dynamic.Interface {
 	return c.dc
 }
 */
-
-func (c kubeCli) CreateResource(def string) {
+func (c kubeCli) jsonToObjects(def string) (*meta.RESTMapping, map[string]interface{}, error) {
 
 	jsonV, err := yaml.ToJSON([]byte(def))
 	if err != nil {
@@ -58,6 +57,23 @@ func (c kubeCli) CreateResource(def string) {
 		log.Printf("restmappererrordisco: [%s]\n", err)
 	}
 
+	var blob interface{}
+	if err := json.Unmarshal(jsonV, &blob); err != nil {
+		log.Printf("jsonunmarshal: [%s]\n", err)
+	}
+
+	return mapping, blob.(map[string]interface{}), nil
+}
+
+func (c kubeCli) createOrUpdate(opp string, def string) map[string]interface{} {
+
+	var unstruct unstructured.Unstructured
+
+	mapping, usObj, err := c.jsonToObjects(def)
+
+	unstruct.Object = usObj
+	log.Println("unstruct:", unstruct)
+
 	apiresourcelist, err := c.disco.ServerResources()
 	if err != nil {
 		log.Printf("apireslisterr: [%s]\n", err)
@@ -66,7 +82,7 @@ func (c kubeCli) CreateResource(def string) {
 	for _, apiresourcegroup := range apiresourcelist {
 		if apiresourcegroup.GroupVersion == mapping.GroupVersionKind.Version {
 			for _, apiresource := range apiresourcegroup.APIResources {
-				log.Printf("found apiresource: [%s]\n", apiresource)
+				// log.Printf("found apiresource: [%s]\n", apiresource)
 
 				if apiresource.Name == mapping.Resource.Resource && apiresource.Kind == mapping.GroupVersionKind.Kind {
 					myapiresource = apiresource
@@ -76,15 +92,6 @@ func (c kubeCli) CreateResource(def string) {
 		}
 	}
 	log.Printf("myapiresource: [%s]\n", myapiresource)
-
-	var unstruct unstructured.Unstructured
-	unstruct.Object = make(map[string]interface{})
-	var blob interface{}
-	if err := json.Unmarshal(jsonV, &blob); err != nil {
-		log.Printf("jsonunmarshal: [%s]\n", err)
-	}
-	unstruct.Object = blob.(map[string]interface{})
-	log.Println("unstruct:", unstruct)
 
 	var gvr schema.GroupVersionResource
 	gvr.Version = myapiresource.Version
@@ -116,16 +123,46 @@ func (c kubeCli) CreateResource(def string) {
 	log.Printf("mygvr: [%s]\n", gvr)
 	res := dclient.Resource(gvr)
 	log.Println(res)
-
-	us, err := res.Namespace(ns).Create(&unstruct, metav1.CreateOptions{})
+	var us *unstructured.Unstructured
+	if opp == "create" {
+		us, err = res.Namespace(ns).Create(&unstruct, metav1.CreateOptions{})
+	} else {
+		us, err = res.Namespace(ns).Update(&unstruct, metav1.UpdateOptions{})
+	}
 	if err != nil {
 		log.Printf("------------------------------\n")
-		log.Printf("trytocreateerror: [%s]\n", err)
+		log.Printf("try to error: [%s][%s]\n", opp, err)
 		log.Printf("gvr: [%s]\n", gvr)
 		log.Printf("unstruct [%s]\n", unstruct)
 		log.Printf("------------------------------\n")
+		return nil
 	}
 	log.Println("unstruct response:", us)
+	return us.Object
+}
+
+func (c kubeCli) Create(def string) map[string]interface{} {
+	return c.createOrUpdate("create", def)
+}
+
+func (c kubeCli) Update(def string) map[string]interface{} {
+	return c.createOrUpdate("update", def)
+}
+
+func (c kubeCli) UpdateStatus(def string) map[string]interface{} {
+	var unstruct unstructured.Unstructured
+	unstruct.Object = make(map[string]interface{})
+	return unstruct.Object
+}
+
+func (c kubeCli) Patch(def string) map[string]interface{} {
+	var unstruct unstructured.Unstructured
+	unstruct.Object = make(map[string]interface{})
+	return unstruct.Object
+}
+
+func (c kubeCli) Delete(def string) error {
+	return nil
 }
 
 func (c kubeCli) List(query QueryType) *unstructured.UnstructuredList {
@@ -198,7 +235,18 @@ metadata:
 data:
   some: "data goes here."
 `
-	c.CreateResource(testConfigmap)
+	_ = c.Create(testConfigmap)
+
+	const testConfigmap2 = `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: testconfigmap
+  namespace: default
+data:
+  some: "updated data goes here."
+`
+	_ = c.Update(testConfigmap2)
 
 	return c
 }
