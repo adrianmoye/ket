@@ -114,7 +114,3 @@ differently because I thought it made sense, but it didn't
 work!... Remember I'm clueless with go, so if you have a
 better idea, please.... :)
 
-**Notes:**
-* // https://stackoverflow.com/questions/47116811/client-go-parse-kubernetes-json-files-to-k8s-structures
-*  //      discocache "k8s.io/client-go/discovery/cached"
-* //"k8s.io/client-go/discovery"
