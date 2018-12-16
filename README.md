@@ -31,7 +31,7 @@ provide `"-n" $namespace`.
 definition. Returns nil on failure. Returns the object on success.
 * `<value> := update <yaml>`: Updates a resource according to a yaml
 definition. Returns nil on failure. Returns the object on success.
-* `delete ["-n <namespace>] <resource type> <resource name>`: Deletes
+* `delete ["-n" <namespace>] <resource type> <resource name>`: Deletes
 desired resource.
 * `render <name> <template text>`: This will render a sub
 template, with some value you've acquired with other queries,
@@ -83,19 +83,18 @@ You can run it with limited service accounts and \*nix perms.
 
 * Cleanup and make nice and usable.
 * Examples.
-* Implement deleting of templates and resources that aren't
-used anymore.
-* Test filtering with labels
-* Allow to apply values to the API, to update K8s resources.
 * Allow CRDs, and auto discovery.
 * Read individual resources rather than watch them all.
+* Implement UpdateStatus and Patching.
 * Add webserver to add templated output for Prometheus
 (or whatever).
 * Implement some form of master election.
 * Allow to store local states between template executions.
 * Improve exec to allow piping in, timing, and indefinite
 length runs(think running a permanent child process), chroot..
-* test in-cluster config
+* Implement signal handling.
+* Test in-cluster config.
+* Test filtering with labels.
 
 **Inspiration:**
 
