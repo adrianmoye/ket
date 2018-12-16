@@ -49,21 +49,12 @@ func main() {
 
 	kc := NewApiCon(kubeconfig)
 
-	const initTemplate = `
-{{- $v := get "-n" "%s" "configmaps" -}}
-{{- range $v -}}
-{{- if eq .metadata.name "%s" -}}
-{{- render .metadata.name .data.template -}}
-{{- end -}}
-{{- end -}}
-`
+	const initTemplate = `{{- render "init-template" (index (get "-n" "%s" "configmaps" "%s") 0).data.template -}}`
 
 	templateName := "initTemplate"
 	templateText := ""
-	t := ""
-	t = *goTemplate
 
-	if t == "" {
+	if goTemplate == nil {
 		templateText = fmt.Sprintf(initTemplate, *namespace, *name)
 	} else {
 		templateText = *goTemplate

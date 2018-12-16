@@ -2,7 +2,7 @@ Kubernetes Event Template
 =========================
 
 It's a simple tool to watch a K8s cluster state and render go-templates
-against it. The templates and be used to manipulate whatever you wish.
+against it. The templates can be used to manipulate whatever you wish.
 
 **WARNING** Don't use this! It's my first go project, and I haven't
 done any typed language programming in a **LONG** time, so I thought
@@ -24,9 +24,9 @@ evaluate it.
 Use the default go-template language to do what you wish, we
 provide the following primitives to allow you to do this:
 
-* `<value> := get ["-n" <namespace>] <resource type>`: This provides
-an ordered list of all of the matching resources. Optionally
-provide `"-n" $namespace`.
+* `<value> := get ["-n" <namespace>] <resource type> [resource name]`: 
+This provides an ordered list of all of the matching resources. Optionally
+provide `"-n" $namespace` and the resource name.
 * `<value> := create <yaml>`: Creates a resource according to a yaml
 definition. Returns nil on failure. Returns the object on success.
 * `<value> := update <yaml>`: Updates a resource according to a yaml
@@ -57,23 +57,11 @@ This will keep going down until it goes to the root resource.
 
 This is the bootstrap template for everything:
 
-	    const initTemplate = `
-	{{- $v := get "-n" "%s" "configmaps" -}}
-	{{- range $v -}}
-	{{- if eq .metadata.name "%s" -}}
-	{{- render .metadata.name .data.template -}}
-	{{- end -}}
-	{{- end -}}
-	`
+	    const initTemplate = `{{- render "init-template" (index (get "-n" "%s" "configmaps" "%s") 0).data.template -}}`
 
 or another example:
 
-	./ket-darwin-amd64 --go-template='{{- $v := get "-n" "default" "configmaps" -}}
-	{{- range $v -}}
-	{{- if eq .metadata.name "loadbalancer-config" -}}
-	{{- render .metadata.name .data.template -}}
-	{{- end -}}
-	{{- end -}}'
+	./ket-darwin-amd64 --go-template='{{- render "init-template" (index (get "-n" "default" "configmaps" "init-template") 0).data.template -}}'
 
 
 **NOTE:** This runs with the permissions you give it, so be careful.
@@ -84,7 +72,6 @@ You can run it with limited service accounts and \*nix perms.
 * Cleanup and make nice and usable.
 * Examples.
 * Allow CRDs, and auto discovery.
-* Read individual resources rather than watch them all.
 * Implement UpdateStatus and Patching.
 * Add webserver to add templated output for Prometheus
 (or whatever).

@@ -239,7 +239,7 @@ func (q QueryControllerComms) ReadItems(args ...string) []map[string]interface{}
 			case 0:
 				qSchema.Resource = arg
 			case 1:
-				//res_name = arg
+				listOpts.FieldSelector = "metadata.name=" + arg
 			}
 			rescount++
 		}
