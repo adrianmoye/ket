@@ -71,7 +71,6 @@ You can run it with limited service accounts and \*nix perms.
 
 * Cleanup and make nice and usable.
 * Examples.
-* Allow CRDs, and auto discovery.
 * Implement UpdateStatus and Patching.
 * Add webserver to add templated output for Prometheus
 (or whatever).

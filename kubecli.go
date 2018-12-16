@@ -4,12 +4,8 @@ import (
 	"encoding/json"
 	"log"
 
-	// https://stackoverflow.com/questions/47116811/client-go-parse-kubernetes-json-files-to-k8s-structures
-	//"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/apimachinery/pkg/watch"
@@ -25,78 +21,75 @@ type kubeCli struct {
 	config *rest.Config
 	dc     dynamic.Interface
 	disco  discovery.DiscoveryInterface
-	ag     []*restmapper.APIGroupResources
 	cs     *kubernetes.Clientset
-	rm     meta.RESTMapper
 }
 
-/*
-func (c kubeCli) getConfig() *rest.Config {
-	return c.config
-}
-func (c kubeCli) getDc() dynamic.Interface {
-	return c.dc
-}
-*/
-func (c kubeCli) jsonToObjects(def string) (*meta.RESTMapping, map[string]interface{}, error) {
+func (c kubeCli) jsonToObjects(def string) (map[string]interface{}, error) {
 
 	jsonV, err := yaml.ToJSON([]byte(def))
 	if err != nil {
 		log.Printf("ERROR: invalid yaml: [%s]\n", err)
 	}
 	log.Println("raw: ", string([]byte(jsonV)))
-	versions := &runtime.VersionedObjects{}
-	obj, gvk, err := unstructured.UnstructuredJSONScheme.Decode([]byte(jsonV), nil, versions)
-	log.Println("obj: ", obj)
-	if err != nil {
-		log.Printf("obj err: [%s]\n", err)
-	}
-
-	mapping, err := c.rm.RESTMapping(gvk.GroupKind(), gvk.Version)
-	if err != nil {
-		log.Printf("restmappererrordisco: [%s]\n", err)
-	}
 
 	var blob interface{}
 	if err := json.Unmarshal(jsonV, &blob); err != nil {
 		log.Printf("jsonunmarshal: [%s]\n", err)
 	}
 
-	return mapping, blob.(map[string]interface{}), nil
+	return blob.(map[string]interface{}), nil
+}
+
+func (c kubeCli) getGVR(search string) schema.GroupVersionResource {
+	var gvr schema.GroupVersionResource
+
+	inSlice := func(search string, slice []string) bool {
+		for _, i := range slice {
+			if search == i {
+				return true
+			}
+		}
+		return false
+	}
+
+	agrList, err := restmapper.GetAPIGroupResources(c.disco)
+	if err != nil {
+		log.Printf("[%s]\n", err)
+	}
+
+	log.Printf("search GVR: [%s]\n", search)
+	for _, agr := range agrList {
+		for _, vr := range agr.VersionedResources {
+			for _, vri := range vr {
+				if (vri.Name == search) || (vri.SingularName == search) || (vri.Kind == search) || (inSlice(search, vri.ShortNames)) {
+					log.Printf("Found GVR: [%s]\n", vri)
+					gvr.Resource = vri.Name
+					gvr.Group = agr.Group.Name
+					gvr.Version = agr.Group.PreferredVersion.Version
+					return gvr
+				}
+			}
+		}
+	}
+	log.Printf("not found GVR: [%s]\n", search)
+
+	return gvr
 }
 
 func (c kubeCli) createOrUpdate(opp string, def string) map[string]interface{} {
 
 	var unstruct unstructured.Unstructured
 
-	mapping, usObj, err := c.jsonToObjects(def)
+	usObj, err := c.jsonToObjects(def)
 
 	unstruct.Object = usObj
 	log.Println("unstruct:", unstruct)
 
-	apiresourcelist, err := c.disco.ServerResources()
-	if err != nil {
-		log.Printf("apireslisterr: [%s]\n", err)
-	}
-	var myapiresource metav1.APIResource
-	for _, apiresourcegroup := range apiresourcelist {
-		if apiresourcegroup.GroupVersion == mapping.GroupVersionKind.Version {
-			for _, apiresource := range apiresourcegroup.APIResources {
-				// log.Printf("found apiresource: [%s]\n", apiresource)
-
-				if apiresource.Name == mapping.Resource.Resource && apiresource.Kind == mapping.GroupVersionKind.Kind {
-					myapiresource = apiresource
-					log.Printf("recording found apiresource: [%s]\n", apiresource)
-				}
-			}
-		}
-	}
-	log.Printf("myapiresource: [%s]\n", myapiresource)
-
 	var gvr schema.GroupVersionResource
-	gvr.Version = myapiresource.Version
-
 	ns := ""
+	if kind, ok := unstruct.Object["kind"]; ok {
+		gvr = c.getGVR(kind.(string))
+	}
 	if md, ok := unstruct.Object["metadata"]; ok {
 		metadata := md.(map[string]interface{})
 		if internalns, ok := metadata["namespace"]; ok {
@@ -107,27 +100,12 @@ func (c kubeCli) createOrUpdate(opp string, def string) map[string]interface{} {
 		gvr.Version = vers.(string)
 	}
 
-	gvr.Group = myapiresource.Group
-	gvr.Resource = myapiresource.Name
-
-	restconfig := c.config
-	//	restconfig.GroupVersion = &schema.GroupVersion{
-	//		Group:   mapping.GroupVersionKind.Group,
-	//		Version: mapping.GroupVersionKind.Version,
-	//	}
-	dclient, err := dynamic.NewForConfig(restconfig)
-	if err != nil {
-		log.Printf("dynamicclientfromconfig: [%s]\n", err)
-	}
-
 	log.Printf("mygvr: [%s]\n", gvr)
-	res := dclient.Resource(gvr)
-	log.Println(res)
 	var us *unstructured.Unstructured
 	if opp == "create" {
-		us, err = res.Namespace(ns).Create(&unstruct, metav1.CreateOptions{})
+		us, err = c.dc.Resource(gvr).Namespace(ns).Create(&unstruct, metav1.CreateOptions{})
 	} else {
-		us, err = res.Namespace(ns).Update(&unstruct, metav1.UpdateOptions{})
+		us, err = c.dc.Resource(gvr).Namespace(ns).Update(&unstruct, metav1.UpdateOptions{})
 	}
 	if err != nil {
 		log.Printf("------------------------------\n")
@@ -182,7 +160,8 @@ func (c kubeCli) Delete(args ...string) string {
 		default:
 			switch rescount {
 			case 0:
-				qSchema.Resource = arg
+				//	qSchema.Resource = arg
+				qSchema = c.getGVR(arg)
 			case 1:
 				res_name = arg
 			}
@@ -190,8 +169,8 @@ func (c kubeCli) Delete(args ...string) string {
 		}
 
 	}
+
 	var deleteOptions metav1.DeleteOptions
-	//deleteOptions = make(metav1.DeleteOptions)
 	err := c.dc.Resource(qSchema).Namespace(namespace).Delete(res_name, &deleteOptions)
 
 	if err != nil {
@@ -204,7 +183,7 @@ func (c kubeCli) Delete(args ...string) string {
 
 func (c kubeCli) List(query QueryType) *unstructured.UnstructuredList {
 
-	dynamicResourceList, err := c.dc.Resource(query.qSchema).Namespace(query.Namespace).List(query.listOpts)
+	dynamicResourceList, err := c.dc.Resource(c.getGVR(query.qSchema.Resource)).Namespace(query.Namespace).List(query.listOpts)
 	if err != nil {
 		log.Printf("Error, can't list resource: [%s]\n", err.Error())
 	}
@@ -214,13 +193,39 @@ func (c kubeCli) List(query QueryType) *unstructured.UnstructuredList {
 
 func (c kubeCli) Watch(query QueryType) watch.Interface {
 
-	dynamicResourceListChan, err := c.dc.Resource(query.qSchema).Namespace(query.Namespace).Watch(query.listOpts)
+	dynamicResourceListChan, err := c.dc.Resource(c.getGVR(query.qSchema.Resource)).Namespace(query.Namespace).Watch(query.listOpts)
 	if err != nil {
 		panic(err.Error())
 		log.Printf("Error, can't watch resource: [%s]\n", err.Error())
 	}
 
 	return dynamicResourceListChan
+}
+
+func (c kubeCli) testCM() {
+	const testConfigmap = `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: testconfigmap
+  namespace: default
+data:
+  some: "updated data goes here."
+`
+	_ = c.Create(testConfigmap)
+
+	const testConfigmap2 = `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: testconfigmap
+  namespace: default
+data:
+  some: "updated data goes here."
+`
+	_ = c.Update(testConfigmap2)
+
+	_ = c.Delete("-n", "default", "cm", "testconfigmap")
 }
 
 func NewApiCon(kubeconfig *string) kubeCli {
@@ -252,41 +257,6 @@ func NewApiCon(kubeconfig *string) kubeCli {
 
 	disco := c.cs.Discovery()
 	c.disco = disco
-
-	apigroups, err := restmapper.GetAPIGroupResources(c.disco)
-	if err != nil {
-		log.Printf("[%s]\n", err)
-	}
-	c.ag = apigroups
-
-	rm := restmapper.NewDiscoveryRESTMapper(c.ag)
-	c.rm = rm
-	/*
-	   	const testConfigmap = `
-	   apiVersion: v1
-	   kind: ConfigMap
-	   metadata:
-	     name: testconfigmap
-	     namespace: default
-	   data:
-	     some: "data goes here."
-	   `
-	   	_ = c.Create(testConfigmap)
-
-	   	const testConfigmap2 = `
-	   apiVersion: v1
-	   kind: ConfigMap
-	   metadata:
-	     name: testconfigmap
-	     namespace: default
-	   data:
-	     some: "updated data goes here."
-	   `
-	   	_ = c.Update(testConfigmap2)
-
-	   	_ = c.Delete("-n", "default", "configmaps", "testconfigmap")
-
-	*/
 
 	return c
 }
